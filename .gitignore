@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data — large files not tracked in git
+chest_xray/
+*.jpeg
+*.jpg
+*.png
+*.dcm
+
+# Model weights — track via MLflow, not git
+models_saved/*.pth
+models_saved/*.pkl
+!models_saved/.gitkeep
+
+# MLflow artifacts
+mlruns/
+!mlruns/.gitignore
+
+# Reports (generated, not source)
+reports/*.png
+reports/*.pdf
+!reports/.gitkeep
+!reports/model_card.json
+
+# macOS
+.DS_Store
+__MACOSX/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment variables
+.env
+.env.local

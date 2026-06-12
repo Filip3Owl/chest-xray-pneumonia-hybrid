@@ -1,0 +1,86 @@
+project:
+  name: "chest-xray-pneumonia-detection"
+  description: "Hybrid Neuro-Symbolic System for Chest X-Ray Pneumonia Detection"
+  version: "1.0.0"
+  seed: 42
+
+paths:
+  data_root: "chest_xray"
+  train_dir: "chest_xray/train"
+  val_dir: "chest_xray/val"
+  test_dir: "chest_xray/test"
+  models_dir: "models_saved"
+  reports_dir: "reports"
+  mlflow_uri: "mlruns"
+
+data:
+  image_size: 224
+  num_classes: 2
+  classes: ["NORMAL", "PNEUMONIA"]
+  # Class weights to handle imbalance (NORMAL is underrepresented)
+  class_weights: [2.89, 1.0]  # 7750/2682 ratio
+  val_split: 0.15  # Use part of train for validation (val set is tiny)
+
+augmentation:
+  train:
+    horizontal_flip: true
+    random_rotate: 15
+    random_brightness_contrast: true
+    gaussian_blur: true
+    grid_distortion: true   # Simulates breathing artifact
+    coarse_dropout: true    # Regularization
+    clahe: true             # Contrast Limited AHE - standard in medical imaging
+  inference:
+    tta_steps: 5            # Test-Time Augmentation
+
+model:
+  backbone: "densenet121"   # CheXNet standard backbone
+  pretrained: true
+  dropout: 0.5
+  freeze_backbone_epochs: 3  # Fine-tune strategy
+
+training:
+  batch_size: 32
+  epochs: 30
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  scheduler: "cosine_annealing"
+  early_stopping_patience: 7
+  gradient_clip: 1.0
+  mixed_precision: true     # AMP for faster training
+  num_workers: 4
+
+expert_system:
+  # Opacity thresholds (normalized pixel values in lung ROI)
+  opacity_threshold: 0.35
+  # GLCM texture features
+  glcm_distances: [1, 3, 5]
+  glcm_angles: [0, 0.785, 1.571, 2.356]  # 0, 45, 90, 135 degrees
+  # Lung segmentation
+  lung_mask_threshold: 0.15
+  # Feature weights for rule scoring
+  opacity_weight: 0.4
+  texture_weight: 0.35
+  density_weight: 0.25
+  # High-confidence override threshold
+  expert_override_threshold: 0.85
+
+hybrid:
+  # Combination method: "weighted" | "meta_learner" | "dempster_shafer"
+  combination_method: "meta_learner"
+  nn_base_weight: 0.65
+  expert_base_weight: 0.35
+  # Meta-learner uses logistic regression on [nn_prob, expert_score, features]
+  meta_learner_cv_folds: 5
+
+mlflow:
+  experiment_name: "chest-xray-pneumonia"
+  tracking_uri: "mlruns"
+  log_models: true
+  log_artifacts: true
+
+metrics:
+  # Clinical metrics are primary in medical AI
+  primary_metric: "auc_roc"
+  threshold: 0.5
+  target_sensitivity: 0.95  # High recall for pneumonia (avoid false negatives)
