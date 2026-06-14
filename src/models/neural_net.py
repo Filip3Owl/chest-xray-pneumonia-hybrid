@@ -4,11 +4,16 @@ Neural network backbone for chest X-ray classification.
 Uses DenseNet-121 following CheXNet (Rajpurkar et al., 2017) — the
 landmark paper showing radiologist-level pneumonia detection.
 """
+import ssl
+import urllib.request
 from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torchvision.models as models
+
+ssl._create_default_https_context = ssl._create_unverified_context
+urllib.request.install_opener(urllib.request.build_opener())
 
 
 class ChestXRayNet(nn.Module):

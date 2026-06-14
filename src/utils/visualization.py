@@ -186,32 +186,115 @@ def plot_dataset_distribution(
 
 
 def plot_training_history(
-    train_metrics: List[dict],
-    val_metrics: List[dict],
+    history: dict,
+    best_epoch: Optional[int] = None,
+    stage_transition_epoch: Optional[int] = None,
+    target_sensitivity: float = 0.95,
     save_path: Optional[str] = None,
 ) -> None:
-    """Plot loss, AUC, sensitivity, specificity across epochs."""
-    epochs = range(1, len(train_metrics) + 1)
-    metric_keys = ["loss", "auc_roc", "sensitivity", "specificity"]
-    titles = ["Loss", "AUC-ROC", "Sensitivity (Recall)", "Specificity"]
+    """
+    Plot the training dynamics produced by ``Trainer.history``.
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    Renders a 6-panel dashboard (loss, AUC-ROC, sensitivity, specificity,
+    F1-score, learning rate) with train/val curves. Clinical context is
+    overlaid: the best-AUC epoch, the Stage 1 -> Stage 2 (backbone unfreeze)
+    transition, and the clinical sensitivity target.
+
+    Args:
+        history: dict with keys ``epoch``, ``lr``, ``train``, ``val`` where
+            ``train``/``val`` are lists of per-epoch metric dicts
+            (as built by :class:`src.training.trainer.Trainer`).
+        best_epoch: epoch (1-indexed) of the saved best model. Highlighted
+            with a vertical marker on every panel.
+        stage_transition_epoch: epoch where the backbone was unfrozen.
+        target_sensitivity: clinical sensitivity floor (drawn on the
+            sensitivity panel). Defaults to 0.95.
+        save_path: optional path to write the figure (PNG, 150 dpi).
+    """
+    epochs = history.get("epoch") or list(range(1, len(history["val"]) + 1))
+    train_metrics = history["train"]
+    val_metrics = history["val"]
+    lrs = history.get("lr")
+
+    panels = [
+        ("loss",        "Loss",                 False),
+        ("auc_roc",     "AUC-ROC",              True),
+        ("sensitivity", "Sensitivity (Recall)", True),
+        ("specificity", "Specificity",          True),
+        ("f1_score",    "F1-Score",             True),
+    ]
+
+    sns.set_style("whitegrid")
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     axes = axes.flatten()
 
-    for ax, key, title in zip(axes, metric_keys, titles):
-        train_vals = [m.get(key, 0) for m in train_metrics]
-        val_vals   = [m.get(key, 0) for m in val_metrics]
-        ax.plot(epochs, train_vals, "b-o", markersize=3, label="Train")
-        ax.plot(epochs, val_vals,   "r-o", markersize=3, label="Val")
+    train_color, val_color = "#1976D2", "#E53935"
+
+    def _annotate_markers(ax):
+        if stage_transition_epoch is not None and stage_transition_epoch <= max(epochs):
+            ax.axvline(stage_transition_epoch, color="#7E57C2", ls="--", lw=1.3, alpha=0.8)
+        if best_epoch is not None:
+            ax.axvline(best_epoch, color="#43A047", ls=":", lw=1.6, alpha=0.9)
+
+    for ax, (key, title, is_score) in zip(axes, panels):
+        train_vals = [m.get(key, np.nan) for m in train_metrics]
+        val_vals   = [m.get(key, np.nan) for m in val_metrics]
+
+        ax.plot(epochs, train_vals, "-o", color=train_color, markersize=4,
+                lw=2, label="Train")
+        ax.plot(epochs, val_vals, "-o", color=val_color, markersize=4,
+                lw=2, label="Val")
+
+        _annotate_markers(ax)
+
+        # Highlight the best-epoch value on the validation curve
+        if best_epoch is not None and best_epoch in epochs:
+            idx = epochs.index(best_epoch)
+            best_val = val_vals[idx]
+            ax.scatter([best_epoch], [best_val], s=120, facecolors="none",
+                       edgecolors="#43A047", linewidths=2, zorder=5)
+            ax.annotate(f"{best_val:.3f}", (best_epoch, best_val),
+                        textcoords="offset points", xytext=(6, 8),
+                        fontsize=9, color="#2E7D32", fontweight="bold")
+
+        if key == "sensitivity":
+            ax.axhline(target_sensitivity, color="#FB8C00", ls="-.", lw=1.3,
+                       alpha=0.8, label=f"Target ≥ {target_sensitivity:.2f}")
+
         ax.set_title(title, fontsize=12, fontweight="bold")
         ax.set_xlabel("Epoch")
-        ax.legend()
+        ax.legend(fontsize=9, loc="best")
         ax.grid(alpha=0.3)
-        if key != "loss":
-            ax.set_ylim(0, 1.05)
+        if is_score:
+            ax.set_ylim(0, 1.02)
 
-    plt.suptitle("Training History", fontsize=14, fontweight="bold")
-    plt.tight_layout()
+    # Last panel: learning rate schedule
+    ax_lr = axes[5]
+    if lrs:
+        ax_lr.plot(epochs, lrs, "-o", color="#00897B", markersize=4, lw=2)
+        ax_lr.set_yscale("log")
+        _annotate_markers(ax_lr)
+        ax_lr.set_title("Learning Rate", fontsize=12, fontweight="bold")
+        ax_lr.set_xlabel("Epoch")
+        ax_lr.set_ylabel("LR (log scale)")
+        ax_lr.grid(alpha=0.3, which="both")
+    else:
+        ax_lr.axis("off")
+
+    # Shared legend entries for the vertical markers
+    legend_handles = []
+    if stage_transition_epoch is not None:
+        legend_handles.append(mpatches.Patch(color="#7E57C2",
+                              label=f"Stage 2 start (epoch {stage_transition_epoch})"))
+    if best_epoch is not None:
+        legend_handles.append(mpatches.Patch(color="#43A047",
+                              label=f"Best model (epoch {best_epoch})"))
+    if legend_handles:
+        fig.legend(handles=legend_handles, loc="upper center", ncol=2,
+                   fontsize=10, bbox_to_anchor=(0.5, 0.965), frameon=True)
+
+    plt.suptitle("Training History — DenseNet-121", fontsize=16, fontweight="bold")
+    plt.tight_layout(rect=[0, 0, 1, 0.94])
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()

@@ -1,7 +1,10 @@
 """Training loop with MLflow integration, AMP, and clinical metrics tracking."""
+import os
 import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+
+os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
 
 import mlflow
 import mlflow.pytorch
@@ -103,7 +106,20 @@ class Trainer:
         self.experiment_name = experiment_name
         self.run_name = run_name
         self.best_auc = 0.0
+        self.best_epoch = 0
         self.best_model_path: Optional[str] = None
+
+        # Per-epoch history for post-training visualization (loss/metrics curves).
+        # MLflow stores these too, but keeping them in-process lets notebooks
+        # plot the training dynamics without re-querying the tracking store.
+        self.history: Dict[str, list] = {
+            "epoch": [],
+            "lr": [],
+            "train": [],
+            "val": [],
+        }
+        # Epoch at which the backbone is unfrozen (Stage 1 -> Stage 2 transition).
+        self.stage_transition_epoch = freeze_backbone_epochs + 1
 
     def _train_epoch(self) -> Dict[str, float]:
         self.model.train()
@@ -220,6 +236,12 @@ class Trainer:
                 }
                 mlflow.log_metrics(log_dict, step=epoch)
 
+                # Record history for later plotting
+                self.history["epoch"].append(epoch)
+                self.history["lr"].append(self.optimizer.param_groups[0]["lr"])
+                self.history["train"].append(train_metrics)
+                self.history["val"].append(val_metrics)
+
                 auc = val_metrics.get("auc_roc", 0.0)
                 print(
                     f"Epoch {epoch:3d}/{self.epochs} | "
@@ -234,6 +256,7 @@ class Trainer:
                 # Save best model
                 if auc > self.best_auc:
                     self.best_auc = auc
+                    self.best_epoch = epoch
                     best_metrics = val_metrics.copy()
                     ckpt_path = self.checkpoint_dir / "best_model.pth"
                     torch.save({
