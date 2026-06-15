@@ -42,6 +42,16 @@ reports/*.pdf
 !reports/.gitkeep
 !reports/model_card.json
 
+# Curated report images embedded in README (override the global *.png ignore)
+!reports/01_eda/eda_sample_gallery.png
+!reports/02_preprocessing/preprocessing_clahe.png
+!reports/03_expert_system/expert_lung_segmentation.png
+!reports/04_neural_net/nn_training_history.png
+!reports/04_neural_net/nn_roc_curve.png
+!reports/05_hybrid/hybrid_roc_comparison.png
+!reports/06_explainability/gradcam_gallery.png
+!reports/06_explainability/hybrid_explainability.png
+
 # macOS
 .DS_Store
 __MACOSX/

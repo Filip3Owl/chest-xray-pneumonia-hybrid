@@ -41,6 +41,37 @@ This project implements a **hybrid neuro-symbolic system** for automatic pneumon
 
 In medical AI, interpretability is critical — clinicians need to understand *why* a system made a decision. Grad-CAM visualizations (notebook 06) show the neural network's focus regions, while the expert system provides explicit rule-based justification.
 
+### Theoretical Foundation
+
+This project sits at the intersection of two historically opposed paradigms in AI:
+
+- **Connectionism** (neural networks) — knowledge is *learned* implicitly as distributed weights from large amounts of data. Excellent at perception, but opaque ("black box").
+- **Symbolism** (expert systems) — knowledge is *encoded* explicitly as human-readable rules. Transparent and verifiable, but brittle and limited to what was coded.
+
+**Neuro-symbolic AI** combines both: the perceptual power of deep learning *grounded* by explicit domain knowledge. Crucially, the two sub-systems have **complementary error profiles** — the network may latch onto spurious correlations (scanner artifacts, text markers, positioning), while the expert rules are anchored to causal radiological signs. Fusing sources whose errors are weakly correlated is exactly what ensemble theory predicts will reduce variance and improve robustness over any single model.
+
+#### Why DenseNet-121 (CheXNet)?
+
+- **Dense connectivity** — each layer receives the feature maps of *all* preceding layers. This strengthens feature propagation, encourages feature reuse, and largely solves the vanishing-gradient problem in deep networks.
+- **Parameter efficiency** — DenseNet-121 has only ~8M parameters (far fewer than comparable ResNets). With a small medical dataset (~5k images) this directly reduces overfitting risk.
+- **Proven for this task** — the landmark *CheXNet* paper (Rajpurkar et al., 2017) established DenseNet-121 as achieving **radiologist-level** pneumonia detection on chest radiographs. We deliberately follow that validated recipe rather than reinventing an architecture.
+- **Transfer learning** — ImageNet pretraining provides strong low-level filters (edges, textures); **stage-wise fine-tuning** (freeze backbone → unfreeze with 10× lower LR) adapts the high-level features to radiographs without catastrophic forgetting.
+
+#### Why a Rule-Based Expert System?
+
+- Encodes **ACR/RSNA radiological criteria** directly: pneumonia manifests as air-space opacification, which is *measurable* as changes in intensity, texture, and spatial distribution.
+- **Fully deterministic and auditable** — it needs no training data and produces the same explainable sub-scores every time, providing a knowledge prior the network cannot fabricate.
+- Built on classical, well-founded image-processing theory (CLAHE, Otsu segmentation, GLCM — detailed in [Expert System Rules](#expert-system-rules)).
+
+#### Why Fuse Them? (Stacked Generalization)
+
+- **Stacked generalization** (Wolpert, 1992): a meta-model learns to combine base learners' outputs, typically outperforming both any single learner *and* fixed averaging.
+- The meta-learner sees the full evidence vector (NN probabilities + the 4 expert sub-scores + expert final score), letting it discover **context-dependent weighting** — e.g. lean on the expert rules when the network is uncertain.
+- **Probability calibration** (isotonic regression via `CalibratedClassifierCV`) ensures outputs behave like true probabilities — essential when the operating threshold is tuned for sensitivity ≥ 0.95.
+
+![NORMAL vs PNEUMONIA sample gallery](reports/01_eda/eda_sample_gallery.png)
+*Representative NORMAL vs PNEUMONIA radiographs (notebook 01). Pneumonic lungs show visibly increased opacity and heterogeneous texture — the very signals the expert system quantifies.*
+
 ---
 
 ## Architecture
@@ -83,6 +114,9 @@ In medical AI, interpretability is critical — clinicians need to understand *w
                │  • Report       │
                └─────────────────┘
 ```
+
+![Hybrid explainability](reports/06_explainability/hybrid_explainability.png)
+*The neuro-symbolic pipeline in a single frame (notebook 06): original radiograph → expert lung mask (symbolic) → Grad-CAM++ attention (neural) → combined overlay. The network learns where to look; the rules justify what was found.*
 
 ---
 
@@ -235,6 +269,9 @@ mlflow ui --backend-store-uri ./mlruns --port 5000
 - Test-Time Augmentation uncertainty estimation
 - Expert system rules + Grad-CAM side-by-side overlay
 
+![Grad-CAM gallery](reports/06_explainability/gradcam_gallery.png)
+*Grad-CAM++ heatmaps reveal the lung regions driving each prediction across NORMAL, bacterial and viral pneumonia cases.*
+
 ### 07 — MLflow Model Registry
 - List all experiment runs
 - Identify and register best model
@@ -245,7 +282,21 @@ mlflow ui --backend-store-uri ./mlruns --port 5000
 
 ## Expert System Rules
 
-The expert system encodes **4 radiological rules** based on ACR/RSNA diagnostic criteria:
+The expert system encodes **4 radiological rules** based on ACR/RSNA diagnostic criteria. Before the rules are applied, two classical preprocessing steps prepare the image:
+
+#### Preprocessing Theory
+
+- **CLAHE (Contrast Limited Adaptive Histogram Equalization)** — equalizes contrast in small local tiles instead of globally, revealing subtle parenchymal detail. A *clip limit* caps histogram peaks so noise in homogeneous regions is not over-amplified. This is a standard in medical imaging where local contrast carries the diagnostic signal.
+
+![CLAHE effect](reports/02_preprocessing/preprocessing_clahe.png)
+*CLAHE enhances local lung contrast without blowing out noise (notebook 02).*
+
+- **Lung Segmentation (Otsu + morphology)** — Otsu's method finds the global threshold that maximizes between-class variance, separating lung fields from background and mediastinum. Morphological opening/closing cleans the mask. All four rules are then evaluated **only inside the lung ROI**, removing irrelevant structures that would bias the scores.
+
+![Lung segmentation](reports/03_expert_system/expert_lung_segmentation.png)
+*Otsu-based lung segmentation isolates the region of interest (notebook 03).*
+
+> **GLCM theory (used in Rule 2)** — The Gray-Level Co-occurrence Matrix (Haralick et al., 1973) is a *second-order* texture descriptor: it counts how often pairs of gray levels occur at a given offset/angle, capturing **spatial** structure that simple intensity statistics miss. Consolidation makes texture coarser and less homogeneous, which shifts the GLCM features measurably.
 
 ### Rule 1: Opacity Detection
 ```
@@ -341,6 +392,19 @@ Learns optimal weights from data. Isotonic calibration ensures well-calibrated p
 | Expert System only | ~0.72 | ~0.75 | ~0.68 |
 | DenseNet-121 only | ~0.96 | ~0.93 | ~0.90 |
 | **Hybrid (Meta-Learner)** | **~0.97** | **~0.95** | **~0.92** |
+
+### Neural Network Training
+
+![Training history](reports/04_neural_net/nn_training_history.png)
+*Stage-wise fine-tuning curves — note the jump in Val AUC when the backbone unfreezes (notebook 04).*
+
+![NN ROC curve](reports/04_neural_net/nn_roc_curve.png)
+*DenseNet-121 ROC on the held-out test set.*
+
+### System Comparison
+
+![Hybrid ROC comparison](reports/05_hybrid/hybrid_roc_comparison.png)
+*ROC curves of all three systems (notebook 05). The meta-learner hybrid dominates both standalone models — empirical confirmation of the complementary-error argument from the [Theoretical Foundation](#theoretical-foundation).*
 
 ---
 
