@@ -126,9 +126,33 @@ This project sits at the intersection of two historically opposed paradigms in A
 
 | Split | NORMAL | PNEUMONIA | Total | Imbalance |
 |-------|--------|-----------|-------|-----------|
-| Train | 1,341  | 3,875     | 5,216 → used: 10,432 | 2.89:1 |
-| Val   | 8      | 8         | 16    | 1:1 |
-| Test  | 234    | 390       | 624 → 1,248 | 1.67:1 |
+| Train (official) | 1,341  | 3,875     | 5,216 | 2.89:1 |
+| Val (official)   | 8      | 8         | 16    | 1:1 |
+| Test  | 234    | 390       | 624   | 1.67:1 |
+
+> **⚠️ The official val split has only 16 images** — far too small for reliable
+> model selection or threshold tuning. We therefore **re-split** at load time
+> into a **3-way** partition that is **class-stratified** *and* **patient-aware**
+> (all images of a `personN` patient stay on the same side, preventing leakage):
+>
+> - **Train** — neural-network training
+> - **Val** — model selection, early stopping, threshold tuning
+> - **Calibration** — meta-learner / hybrid fusion training, kept *separate from
+>   val* so the fusion is never tuned on data used to pick the network
+>   (`make_calibration_splits`)
+>
+> The official `test` split is **never touched**, so final evaluation stays clean.
+> Same `seed` + fractions ⇒ identical partition across all notebooks.
+
+| Re-split (seed 42, 70/15/15 default) | NORMAL | PNEUMONIA | Total |
+|--------------------------------------|--------|-----------|-------|
+| Train       | 944 | 2,702 | 3,646 |
+| Val         | 202 | 525   | 727 |
+| Calibration | 203 | 656   | 859 |
+| Test (untouched) | 234 | 390 | 624 |
+
+> For a simple train/val split (no calibration set) use `make_stratified_splits`
+> or pass `calib_split=0` to `build_dataloaders`.
 
 > **Note on imbalance**: The training set has ~3× more PNEUMONIA images.  
 > We address this with `WeightedRandomSampler` + inverse-frequency class weights in the loss.

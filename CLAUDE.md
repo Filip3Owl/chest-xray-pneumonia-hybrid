@@ -21,7 +21,7 @@ Combina rede neural profunda (DenseNet-121) com sistema especialista baseado em 
 - **Ativar:** `source .venv/bin/activate`
 - **Instalar dependências:** `pip install -r requirements.txt`
 - **Instalar projeto:** `pip install -e .`
-- **Variável necessária:** `ALBUMENTATIONS_DISABLE_VERSION_CHECK=1` (evita warning de SSL no macOS)
+- **Variável necessária:** `NO_ALBUMENTATIONS_UPDATE=1` (evita warning de SSL no macOS; nome antigo: `ALBUMENTATIONS_DISABLE_VERSION_CHECK`). Já setada automaticamente em `src/data/dataset.py` antes do import.
 
 ### Restrições de dependências
 - `numpy<2.0` — NumPy 2.x quebra o PyTorch instalado
@@ -99,7 +99,11 @@ Três estratégias de fusão:
 - **Inferência:** apenas Resize + CLAHE + Normalize (ImageNet mean/std)
 - **TTA:** 5 transforms para estimativa de incerteza em inferência
 - **Balanceamento:** `WeightedRandomSampler` + `CrossEntropyLoss(weight=class_weights)`
-- **Builder:** `build_dataloaders(data_root, image_size, batch_size, num_workers)`
+- **Re-split do val:** o val oficial tem só 16 imagens. `build_dataloaders` recria um split **3-vias** (train/val/calibração, 70/15/15) a partir do pool train+val, **estratificado por classe** e **agrupado por paciente** (`personN` nunca cruza splits). `make_calibration_splits` (3-vias) / `make_stratified_splits` (2-vias). O `test` nunca é tocado. Mesmo `seed`+frações ⇒ partição idêntica entre notebooks.
+  - **train** → treino da rede | **val** → model selection/early stopping/threshold | **calibração** → meta-learner (notebook 05), separado do val para evitar leakage na fusão.
+- **Reprodutibilidade:** `src/utils/seed.py::set_seed(42)` (torch/numpy/random + cuDNN determinism) chamado no topo do notebook 04; DataLoader usa `seed_worker` + `Generator` semeado.
+- **Pré-voo:** `scripts/preflight_smoke.py` roda o pipeline completo num subset minúsculo (2 épocas, inclui unfreeze) em ~1-2min na CPU antes de um treino longo.
+- **Builder:** `build_dataloaders(data_root, image_size, batch_size, num_workers, val_split, calib_split, seed)`
 
 ---
 
@@ -201,7 +205,7 @@ jupyter notebook notebooks/
 mlflow ui --backend-store-uri ./mlruns --port 5000
 
 # Rodar smoke tests
-ALBUMENTATIONS_DISABLE_VERSION_CHECK=1 python -c "
+NO_ALBUMENTATIONS_UPDATE=1 python -c "
 import sys; sys.path.insert(0, '.')
 from src.models.neural_net import ChestXRayNet
 from src.models.expert_system import ChestExpertSystem
