@@ -190,7 +190,11 @@ chest2/
 │   │   └── trainer.py            # Training loop + MLflow integration
 │   └── utils/
 │       ├── metrics.py            # Clinical metrics (sensitivity, specificity, AUC)
+│       ├── seed.py              # Reproducibility (set_seed, seed_worker, generator)
 │       └── visualization.py      # Grad-CAM, ROC, confusion matrix plots
+│
+├── scripts/
+│   └── preflight_smoke.py        # Fast pipeline sanity check before long training
 │
 ├── configs/
 │   └── config.yaml               # All hyperparameters and paths
@@ -227,14 +231,26 @@ pip install -e .
 python -m ipykernel install --user --name=chest-xray --display-name="Python (chest-xray)"
 ```
 
-### 2. Launch Jupyter
+### 2. Pre-Flight Smoke Test (recommended before long training)
+
+Before committing to a multi-hour run, validate the full pipeline
+(dataloaders → model → 2 epochs incl. the Stage 1→2 unfreeze → checkpoint →
+MLflow) on a tiny CPU subset in ~1-2 min. It catches integration bugs early:
+
+```bash
+source .venv/bin/activate
+NO_ALBUMENTATIONS_UPDATE=1 python scripts/preflight_smoke.py
+# exits non-zero if any sanity check fails
+```
+
+### 3. Launch Jupyter
 
 ```bash
 source .venv/bin/activate
 jupyter notebook notebooks/
 ```
 
-### 3. Run Notebooks in Order
+### 4. Run Notebooks in Order
 
 | Notebook | Description | Expected Duration |
 |----------|-------------|-------------------|
@@ -246,7 +262,7 @@ jupyter notebook notebooks/
 | `06_explainability_gradcam.ipynb` | Grad-CAM visualizations | 10 min |
 | `07_mlflow_model_registry.ipynb` | Model registry and versioning | 5 min |
 
-### 4. View MLflow Dashboard
+### 5. View MLflow Dashboard
 
 ```bash
 source .venv/bin/activate
@@ -461,7 +477,7 @@ This project follows best practices for responsible medical AI:
 4. **Uncertainty Quantification**: TTA-based uncertainty + Dempster-Shafer conflict detection
 5. **Imbalance Handling**: WeightedRandomSampler + class-weighted loss
 6. **No Data Leakage**: Test set never used during training or hyperparameter tuning
-7. **Reproducibility**: Fixed seeds, version-controlled code, MLflow-tracked experiments
+7. **Reproducibility**: Global seeding (`src/utils/seed.py` — torch/numpy/random + cuDNN determinism + seeded DataLoader workers), version-controlled code, MLflow-tracked experiments
 8. **Preprocessing**: CLAHE following medical imaging literature standards
 9. **Augmentation**: Clinically realistic augmentations only (no color jitter in grayscale)
 10. **Documentation**: Model card exported with each experiment
