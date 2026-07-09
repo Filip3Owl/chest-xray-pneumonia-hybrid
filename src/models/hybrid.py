@@ -29,6 +29,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.linear_model import LogisticRegressionCV
+from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
 
